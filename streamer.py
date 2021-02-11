@@ -3,6 +3,10 @@ from lossy_socket import LossyUDP
 # do not import anything else from socket except INADDR_ANY
 from socket import INADDR_ANY
 
+import struct
+import concurrent.futures
+import time
+
 
 class Streamer:
     def __init__(self, dst_ip, dst_port,
@@ -14,24 +18,67 @@ class Streamer:
         self.dst_ip = dst_ip
         self.dst_port = dst_port
 
-    def send(self, data_bytes: bytes) -> None:
-        """Note that data_bytes can be larger than one packet."""
-        # Your code goes here!  The code below should be changed!
+        self.send_seq = 0x00000001
+        self.send_buffer = dict()
 
-        # for now I'm just sending the raw application-level data in one UDP payload
-        self.socket.sendto(data_bytes, (self.dst_ip, self.dst_port))
+        self.recv_seq = 0x00000001
+        self.recv_buffer = dict()
+
+        self.closed = False
+
+        self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        self.executor.submit(self.listener)
+
+        
+
+
+    def send(self, data_bytes: bytes) -> None:
+
+        for data in self.partition_data(data_bytes):
+            self.send_buffer[self.send_seq] = self.build_packet(data,self.send_seq)
+            self.socket.sendto(self.send_buffer[self.send_seq], (self.dst_ip, self.dst_port))
+            self.send_seq += 1
 
     def recv(self) -> bytes:
         """Blocks (waits) if no data is ready to be read from the connection."""
         # your code goes here!  The code below should be changed!
-        
-        # this sample code just calls the recvfrom method on the LossySocket
-        data, addr = self.socket.recvfrom()
-        # For now, I'll just pass the full UDP payload to the app
-        return data
+        while self.recv_seq not in self.recv_buffer:
+            continue
+        self.recv_seq += 1
+        return self.recv_buffer.pop(self.recv_seq - 1)
 
     def close(self) -> None:
         """Cleans up. It should block (wait) until the Streamer is done with all
            the necessary ACKs and retransmissions"""
-        # your code goes here, especially after you add ACKs and retransmissions.
-        pass
+        self.closed = True
+        self.socket.stoprecv()
+        self.executor.shutdown()
+
+    def listener(self):
+        while not self.closed: # a later hint will explain self.closed
+            try:
+                seq, data = self.deconstruct_packet(self.socket.recvfrom()[0])
+                self.recv_buffer[seq] = data
+                
+            except Exception as e:
+                print("listener died!")
+                print(e)
+                self.close()
+
+    def build_packet(self, data, seq):
+        f = 'I' + str(len(data)) + 's'
+        return struct.pack(f, seq, data)
+
+    def deconstruct_packet(self, packet):
+        f = 'I' + str(len(packet)-4) + 's'
+        return struct.unpack(f, packet)
+
+    def partition_data(self,data):
+        return (data[0 + i : 1468 + i] for i in range(0, len(data), 1468))
+
+
+
+        
+
+
+
