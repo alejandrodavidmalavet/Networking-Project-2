@@ -29,21 +29,32 @@ class Streamer:
         self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
         self.executor.submit(self.listener)
 
+        self.ack = dict()
+
         
 
 
     def send(self, data_bytes: bytes) -> None:
-
         for data in self.partition_data(data_bytes):
-            self.send_buffer[self.send_seq] = self.build_packet(data,self.send_seq)
+            self.send_buffer[self.send_seq] = self.build_packet(self.send_seq,0,data)
             self.socket.sendto(self.send_buffer[self.send_seq], (self.dst_ip, self.dst_port))
-            self.send_seq += 1
+            self.ack[self.send_seq] = False
+            time.sleep(0.25)
+            if self.ack[self.send_seq]:
+                self.send_seq += 1
+            else :
+                print("Resending Packet #" + str(self.send_seq))
+                self.send(data_bytes)
+
+    def send_ack(self,seq):
+        self.socket.sendto(self.build_packet(seq,True,bytes()), (self.dst_ip, self.dst_port))
 
     def recv(self) -> bytes:
         """Blocks (waits) if no data is ready to be read from the connection."""
         # your code goes here!  The code below should be changed!
         while self.recv_seq not in self.recv_buffer:
             continue
+        self.send_ack(self.recv_seq)
         self.recv_seq += 1
         return self.recv_buffer.pop(self.recv_seq - 1)
 
@@ -57,24 +68,27 @@ class Streamer:
     def listener(self):
         while not self.closed: # a later hint will explain self.closed
             try:
-                seq, data = self.deconstruct_packet(self.socket.recvfrom()[0])
-                self.recv_buffer[seq] = data
+                seq, ack, data = self.deconstruct_packet(self.socket.recvfrom()[0])
+                if ack:
+                    self.ack[seq] = True
+                else:
+                    self.recv_buffer[seq] = data
                 
             except Exception as e:
                 print("listener died!")
                 print(e)
                 self.close()
 
-    def build_packet(self, data, seq):
-        f = 'I' + str(len(data)) + 's'
-        return struct.pack(f, seq, data)
+    def build_packet(self, seq, ack, data):
+        f = 'I?' + str(len(data)) + 's'
+        return struct.pack(f, seq, ack, data)
 
     def deconstruct_packet(self, packet):
-        f = 'I' + str(len(packet)-4) + 's'
+        f = 'I?' + str(len(packet)-5) + 's'
         return struct.unpack(f, packet)
 
     def partition_data(self,data):
-        return (data[0 + i : 1468 + i] for i in range(0, len(data), 1468))
+        return (data[0 + i : 1467 + i] for i in range(0, len(data), 1467))
 
 
 
