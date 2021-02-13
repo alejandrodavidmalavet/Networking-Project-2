@@ -48,7 +48,6 @@ class Streamer:
 
     def send_ack(self,seq):
         self.socket.sendto(self.build_packet(seq,True,bytes()), (self.dst_ip, self.dst_port))
-        self.acks.add(seq)
 
     def recv(self) -> bytes:
         """Blocks (waits) if no data is ready to be read from the connection."""
@@ -72,7 +71,9 @@ class Streamer:
 
                 seq, ack, data = self.deconstruct_packet(self.socket.recvfrom()[0])
 
-                if not ack:
+                if ack:
+                    self.acks.add(seq)
+                else:
                     self.recv_buffer[seq] = data
                 
             except Exception as e:
