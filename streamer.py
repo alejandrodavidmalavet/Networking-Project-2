@@ -29,7 +29,7 @@ class Streamer:
         self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
         self.executor.submit(self.listener)
 
-        self.ack = dict()
+        self.acks = set()
 
         
 
@@ -38,9 +38,9 @@ class Streamer:
         for data in self.partition_data(data_bytes):
             self.send_buffer[self.send_seq] = self.build_packet(self.send_seq,0,data)
             self.socket.sendto(self.send_buffer[self.send_seq], (self.dst_ip, self.dst_port))
-            self.ack[self.send_seq] = False
+            #if self.send_seq not in self.acks: self.acks[self.send_seq] = False
             time.sleep(0.25)
-            if self.ack[self.send_seq]:
+            if self.send_seq in self.acks:
                 self.send_seq += 1
             else :
                 print("Resending Packet #" + str(self.send_seq))
@@ -48,6 +48,7 @@ class Streamer:
 
     def send_ack(self,seq):
         self.socket.sendto(self.build_packet(seq,True,bytes()), (self.dst_ip, self.dst_port))
+        self.acks.add(seq)
 
     def recv(self) -> bytes:
         """Blocks (waits) if no data is ready to be read from the connection."""
@@ -68,10 +69,10 @@ class Streamer:
     def listener(self):
         while not self.closed: # a later hint will explain self.closed
             try:
+
                 seq, ack, data = self.deconstruct_packet(self.socket.recvfrom()[0])
-                if ack:
-                    self.ack[seq] = True
-                else:
+
+                if not ack:
                     self.recv_buffer[seq] = data
                 
             except Exception as e:
@@ -89,10 +90,4 @@ class Streamer:
 
     def partition_data(self,data):
         return (data[0 + i : 1467 + i] for i in range(0, len(data), 1467))
-
-
-
-        
-
-
 
