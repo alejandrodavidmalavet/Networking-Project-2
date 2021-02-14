@@ -36,15 +36,28 @@ class Streamer:
         self.acks = set()
         self.fin = False
 
+        self.nagles_binary_string = b''
+
     def resend(self, seq):
         self.socket.sendto(self.send_buffer[seq], (self.dst_ip,self.dst_port))
         Timer(2.5,self.repeat,[seq]).start()
 
     def send(self, data_bytes: bytes) -> None:
-        for data in self.partition_data(data_bytes):
-            self.send_buffer[self.send_seq] = self.build_packet(self.send_seq,False,False,data)
-            self.resend(self.send_seq)
-            self.send_seq += 1
+        if not self.nagles_binary_string:
+            Timer(0.05, self.nagles_algorithm, [len(data_bytes)]).start() 
+        self.nagles_binary_string+=data_bytes
+
+
+    def nagles_algorithm(self, currentData):
+        if currentData<len(self.nagles_binary_string): # if there is more data to send
+            Timer(0.05, self.nagles_algorithm, [len(self.nagles_binary_string)]).start() 
+        else:
+            for data in self.partition_data(self.nagles_binary_string):
+                self.send_buffer[self.send_seq] = self.build_packet(self.send_seq,False,False,data)
+                self.resend(self.send_seq)
+                self.send_seq += 1
+            self.nagles_binary_string = b''
+
 
     def repeat(self,seq):
         if seq not in self.acks:
@@ -72,7 +85,7 @@ class Streamer:
             self.send_fin()
             time.sleep(0.1)
         print("FIN HANDSHAKE")
-        time.sleep(10)
+        time.sleep(5)
         """Cleans up. It should block (wait) until the Streamer is done with all
            the necessary ACKs and retransmissions"""
         self.closed = True
