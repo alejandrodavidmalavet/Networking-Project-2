@@ -7,6 +7,8 @@ import struct
 import concurrent.futures
 import time
 
+from threading import Timer
+
 import hashlib
 
 
@@ -34,18 +36,19 @@ class Streamer:
         self.acks = set()
         self.fin = False
 
-        
-
+    def resend(self, seq):
+        self.socket.sendto(self.send_buffer[seq], (self.dst_ip,self.dst_port))
+        Timer(2.5,self.repeat,[seq]).start()
 
     def send(self, data_bytes: bytes) -> None:
         for data in self.partition_data(data_bytes):
             self.send_buffer[self.send_seq] = self.build_packet(self.send_seq,False,False,data)
-            self.socket.sendto(self.send_buffer[self.send_seq], (self.dst_ip, self.dst_port))
-            time.sleep(0.25)
-            if self.send_seq not in self.acks:
-                self.send(data_bytes)
-            else :
-                self.send_seq += 1
+            self.resend(self.send_seq)
+            self.send_seq += 1
+
+    def repeat(self,seq):
+        if seq not in self.acks:
+            self.resend(seq)
 
     def send_ack(self,seq):
         #print("Sending Acknowledgement for Packet #" + str(seq))
@@ -58,7 +61,7 @@ class Streamer:
         """Blocks (waits) if no data is ready to be read from the connection."""
         # your code goes here!  The code below should be changed!
         while self.recv_seq not in self.recv_buffer:
-            continue
+            time.sleep(0.01)
         self.recv_seq += 1
         return self.recv_buffer.pop(self.recv_seq - 1)
 
@@ -68,8 +71,8 @@ class Streamer:
         while self.send_seq not in self.acks:
             self.send_fin()
             time.sleep(0.1)
-        #print("FIN recieved")
-        time.sleep(2)
+        print("FIN HANDSHAKE")
+        time.sleep(10)
         """Cleans up. It should block (wait) until the Streamer is done with all
            the necessary ACKs and retransmissions"""
         self.closed = True
