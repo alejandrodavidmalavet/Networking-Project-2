@@ -42,10 +42,10 @@ class Streamer:
             self.send_buffer[self.send_seq] = self.build_packet(self.send_seq,False,False,data)
             self.socket.sendto(self.send_buffer[self.send_seq], (self.dst_ip, self.dst_port))
             time.sleep(0.25)
-            while self.send_seq not in self.acks:
+            if self.send_seq not in self.acks:
                 self.send(data_bytes)
-                time.sleep(0.25)
-            self.send_seq += 1
+            else :
+                self.send_seq += 1
 
     def send_ack(self,seq):
         #print("Sending Acknowledgement for Packet #" + str(seq))
