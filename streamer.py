@@ -10,6 +10,7 @@ import time
 from threading import Timer
 
 import hashlib
+import zlib
 
 
 class Streamer:
@@ -22,10 +23,10 @@ class Streamer:
         self.dst_ip = dst_ip
         self.dst_port = dst_port
 
-        self.send_seq = 0x00000000
+        self.send_seq = 0x00000001
         self.send_buffer = dict()
 
-        self.recv_seq = 0x00000000
+        self.recv_seq = 0x00000001
         self.recv_buffer = dict()
 
         self.closed = False
@@ -51,11 +52,10 @@ class Streamer:
             self.resend(seq)
 
     def send_ack(self,seq):
-        #print("Sending Acknowledgement for Packet #" + str(seq))
-        self.socket.sendto(self.build_packet(seq,True,False,bytes()), (self.dst_ip, self.dst_port))
+        self.socket.sendto(self.build_packet(seq,True,False, bytes(b'\x00\x00')), (self.dst_ip, self.dst_port))
 
     def send_fin(self):
-        self.socket.sendto(self.build_packet(self.send_seq,False,True,bytes()), (self.dst_ip, self.dst_port))
+        self.socket.sendto(self.build_packet(self.send_seq,False,True, bytes(b'\x00\x00')), (self.dst_ip, self.dst_port))
 
     def recv(self) -> bytes:
         """Blocks (waits) if no data is ready to be read from the connection."""
@@ -79,30 +79,51 @@ class Streamer:
         self.socket.stoprecv()
 
     def listener(self):
-        while not self.closed: # a later hint will explain self.closed
+        while not self.closed:
             try:
                 packet = self.socket.recvfrom()[0]
-                if packet:
-                    seq, ack, fin, data = self.deconstruct_packet(packet)
 
-                    if ack:
-                        self.acks.add(seq)
-                    else:
-                        self.recv_buffer[seq] = data
-                        self.send_ack(seq)
+                if not packet: return
+                    
+                packet, hash, seq, ack, fin, data = self.deconstruct_packet(packet)
+
+                if self.corrupted(packet,hash):
+                    print(packet)
+                    print(ack,fin)
+                    return
+
+                if ack:
+                    self.acks.add(seq)
+
+                elif fin:
+                    self.send_ack(seq)
+
+                else :
+                    self.recv_buffer[seq] = data
+                    self.send_ack(seq)
                 
             except Exception as e:
                 print("listener died!")
                 print(e)
 
+    def partition_data(self,data):
+        return (data[0 + i : 1462 + i] for i in range(0, len(data), 1462))
+
     def build_packet(self, seq, ack, fin, data):
         f = 'I??' + str(len(data)) + 's'
-        return struct.pack(f, seq, ack, fin, data)
+        return self.packet_hasher(struct.pack(f, seq, ack, fin, data))
 
     def deconstruct_packet(self, packet):
+        f = str(len(packet)-4) + 'sI'
+        packet, hash = struct.unpack(f, packet)
         f = 'I??' + str(len(packet)-6) + 's'
-        return struct.unpack(f, packet)
+        seq, ack, fin, data = struct.unpack(f,packet)
+        return packet, hash, seq, ack, fin, data
+    
+    def packet_hasher(self,packet):
+        f = str(len(packet)) + 'sI'
+        return struct.pack(f,packet,zlib.adler32(packet))
 
-    def partition_data(self,data):
-        return (data[0 + i : 1466 + i] for i in range(0, len(data), 1466))
+    def corrupted(self,packet,hash):
+        return zlib.adler32(packet) != hash
 
