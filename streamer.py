@@ -71,9 +71,7 @@ class Streamer:
                     
                 packet, hash, seq, ack, fin, data = self.deconstruct_packet(packet)
 
-                if self.corrupted(packet,hash):
-                    print(packet,hash,zlib.adler32(packet))
-                    return
+                if self.corrupted(packet,hash): return
 
                 if ack:
                     self.acks.add(seq)
