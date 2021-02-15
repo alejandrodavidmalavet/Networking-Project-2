@@ -35,13 +35,12 @@ class Streamer:
         self.executor.submit(self.listener)
 
         self.acks = set()
-        self.fin = False
 
         self.nagles_binary_string = b''
 
     def send(self, data_bytes: bytes) -> None:
         if not self.nagles_binary_string:
-            Timer(0.05, self.nagles_algorithm, [len(data_bytes)]).start() 
+            Timer(0.01, self.nagles_algorithm, [len(data_bytes)]).start() 
         self.nagles_binary_string+=data_bytes
 
     def recv(self) -> bytes:
@@ -53,7 +52,7 @@ class Streamer:
         return self.recv_buffer.pop(self.recv_seq - 1)
 
     def close(self) -> None:
-
+        time.sleep(5)
         while self.send_seq not in self.acks:
             self.send_fin()
             time.sleep(0.1)
@@ -68,11 +67,13 @@ class Streamer:
             try:
                 packet = self.socket.recvfrom()[0]
 
-                if not packet: pass
+                if not packet: return
                     
                 packet, hash, seq, ack, fin, data = self.deconstruct_packet(packet)
 
-                if self.corrupted(packet,hash): pass
+                if self.corrupted(packet,hash):
+                    print(packet,hash,zlib.adler32(packet))
+                    return
 
                 if ack:
                     self.acks.add(seq)
@@ -111,7 +112,7 @@ class Streamer:
 
     def nagles_algorithm(self, currentData):
         if currentData<len(self.nagles_binary_string): # if there is more data to send
-            Timer(0.05, self.nagles_algorithm, [len(self.nagles_binary_string)]).start() 
+            Timer(0.01, self.nagles_algorithm, [len(self.nagles_binary_string)]).start() 
         else:
             for data in self.partition_data(self.nagles_binary_string):
                 self.send_buffer[self.send_seq] = self.build_packet(self.send_seq,False,False,data)
@@ -125,7 +126,7 @@ class Streamer:
 
     def resend(self, seq):
         self.socket.sendto(self.send_buffer[seq], (self.dst_ip,self.dst_port))
-        Timer(2.5,self.repeat,[seq]).start()
+        Timer(1,self.repeat,[seq]).start()
 
     def send_ack(self,seq):
         self.socket.sendto(self.build_packet(seq,True,False, bytes(b'\x00\x00')), (self.dst_ip, self.dst_port))
