@@ -9,7 +9,6 @@ import time
 
 from threading import Timer
 
-import hashlib
 import zlib
 
 
@@ -42,7 +41,9 @@ class Streamer:
         Timer(2.5,self.repeat,[seq]).start()
 
     def send(self, data_bytes: bytes) -> None:
+        
         for data in self.partition_data(data_bytes):
+            print(data)
             self.send_buffer[self.send_seq] = self.build_packet(self.send_seq,False,False,data)
             self.resend(self.send_seq)
             self.send_seq += 1
@@ -122,6 +123,7 @@ class Streamer:
     
     def packet_hasher(self,packet):
         f = str(len(packet)) + 'sI'
+        print(packet)
         return struct.pack(f,packet,zlib.adler32(packet))
 
     def corrupted(self,packet,hash):
