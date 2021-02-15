@@ -10,6 +10,7 @@ import time
 from threading import Timer
 
 import hashlib
+import zlib
 
 
 class Streamer:
@@ -38,15 +39,75 @@ class Streamer:
 
         self.nagles_binary_string = b''
 
-    def resend(self, seq):
-        self.socket.sendto(self.send_buffer[seq], (self.dst_ip,self.dst_port))
-        Timer(2.5,self.repeat,[seq]).start()
-
     def send(self, data_bytes: bytes) -> None:
         if not self.nagles_binary_string:
             Timer(0.05, self.nagles_algorithm, [len(data_bytes)]).start() 
         self.nagles_binary_string+=data_bytes
 
+    def recv(self) -> bytes:
+
+        while self.recv_seq not in self.recv_buffer:
+            time.sleep(0.01)
+
+        self.recv_seq += 1
+        return self.recv_buffer.pop(self.recv_seq - 1)
+
+    def close(self) -> None:
+
+        while self.send_seq not in self.acks:
+            self.send_fin()
+            time.sleep(0.1)
+
+        time.sleep(5)
+
+        self.closed = True
+        self.socket.stoprecv()
+
+    def listener(self):
+        while not self.closed:
+            try:
+                packet = self.socket.recvfrom()[0]
+
+                if not packet: pass
+                    
+                packet, hash, seq, ack, fin, data = self.deconstruct_packet(packet)
+
+                if self.corrupted(packet,hash): pass
+
+                if ack:
+                    self.acks.add(seq)
+
+                elif fin:
+                    self.send_ack(seq)
+
+                else :
+                    self.recv_buffer[seq] = data
+                    self.send_ack(seq)
+                
+            except Exception as e:
+                print("listener died!")
+                print(e)
+
+    def partition_data(self,data):
+        return (data[0 + i : 1462 + i] for i in range(0, len(data), 1462))
+
+    def build_packet(self, seq, ack, fin, data):
+        f = 'I??' + str(len(data)) + 's'
+        return self.packet_hasher(struct.pack(f, seq, ack, fin, data))
+
+    def deconstruct_packet(self, packet):
+        f = str(len(packet)-4) + 'sI'
+        packet, hash = struct.unpack(f, packet)
+        f = 'I??' + str(len(packet)-6) + 's'
+        seq, ack, fin, data = struct.unpack(f,packet)
+        return packet, hash, seq, ack, fin, data
+    
+    def packet_hasher(self,packet):
+        f = str(len(packet)) + 'sI'
+        return struct.pack(f,packet,zlib.adler32(packet))
+
+    def corrupted(self,packet,hash):
+        return zlib.adler32(packet) != hash
 
     def nagles_algorithm(self, currentData):
         if currentData<len(self.nagles_binary_string): # if there is more data to send
@@ -58,64 +119,21 @@ class Streamer:
                 self.send_seq += 1
             self.nagles_binary_string = b''
 
-
     def repeat(self,seq):
         if seq not in self.acks:
             self.resend(seq)
 
+    def resend(self, seq):
+        self.socket.sendto(self.send_buffer[seq], (self.dst_ip,self.dst_port))
+        Timer(2.5,self.repeat,[seq]).start()
+
     def send_ack(self,seq):
-        #print("Sending Acknowledgement for Packet #" + str(seq))
-        self.socket.sendto(self.build_packet(seq,True,False,bytes()), (self.dst_ip, self.dst_port))
+        self.socket.sendto(self.build_packet(seq,True,False, bytes(b'\x00\x00')), (self.dst_ip, self.dst_port))
 
     def send_fin(self):
-        self.socket.sendto(self.build_packet(self.send_seq,False,True,bytes()), (self.dst_ip, self.dst_port))
+        self.socket.sendto(self.build_packet(self.send_seq,False,True, bytes(b'\x00\x00')), (self.dst_ip, self.dst_port))
 
-    def recv(self) -> bytes:
-        """Blocks (waits) if no data is ready to be read from the connection."""
-        # your code goes here!  The code below should be changed!
-        while self.recv_seq not in self.recv_buffer:
-            time.sleep(0.01)
-        self.recv_seq += 1
-        return self.recv_buffer.pop(self.recv_seq - 1)
+        
 
-    def close(self) -> None:
-    
 
-        while self.send_seq not in self.acks:
-            self.send_fin()
-            time.sleep(0.1)
-        print("FIN HANDSHAKE")
-        time.sleep(5)
-        """Cleans up. It should block (wait) until the Streamer is done with all
-           the necessary ACKs and retransmissions"""
-        self.closed = True
-        self.socket.stoprecv()
-
-    def listener(self):
-        while not self.closed: # a later hint will explain self.closed
-            try:
-                packet = self.socket.recvfrom()[0]
-                if packet:
-                    seq, ack, fin, data = self.deconstruct_packet(packet)
-
-                    if ack:
-                        self.acks.add(seq)
-                    else:
-                        self.recv_buffer[seq] = data
-                        self.send_ack(seq)
-                
-            except Exception as e:
-                print("listener died!")
-                print(e)
-
-    def build_packet(self, seq, ack, fin, data):
-        f = 'I??' + str(len(data)) + 's'
-        return struct.pack(f, seq, ack, fin, data)
-
-    def deconstruct_packet(self, packet):
-        f = 'I??' + str(len(packet)-6) + 's'
-        return struct.unpack(f, packet)
-
-    def partition_data(self,data):
-        return (data[0 + i : 1466 + i] for i in range(0, len(data), 1466))
 
