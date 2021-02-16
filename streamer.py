@@ -10,7 +10,10 @@ import time
 from threading import Timer
 
 import hashlib
+<<<<<<< HEAD
 
+=======
+>>>>>>> un-hashed
 
 class Streamer:
     def __init__(self, dst_ip, dst_port,
@@ -35,29 +38,16 @@ class Streamer:
 
         self.acks = set()
         self.fin = False
-
-        self.nagles_binary_string = b''
-
+        
     def resend(self, seq):
         self.socket.sendto(self.send_buffer[seq], (self.dst_ip,self.dst_port))
-        Timer(2.5,self.repeat,[seq]).start()
+        return Timer(1,self.repeat,[seq]).start()
 
     def send(self, data_bytes: bytes) -> None:
-        if not self.nagles_binary_string:
-            Timer(0.05, self.nagles_algorithm, [len(data_bytes)]).start() 
-        self.nagles_binary_string+=data_bytes
-
-
-    def nagles_algorithm(self, currentData):
-        if currentData<len(self.nagles_binary_string): # if there is more data to send
-            Timer(0.05, self.nagles_algorithm, [len(self.nagles_binary_string)]).start() 
-        else:
-            for data in self.partition_data(self.nagles_binary_string):
-                self.send_buffer[self.send_seq] = self.build_packet(self.send_seq,False,False,data)
-                self.resend(self.send_seq)
-                self.send_seq += 1
-            self.nagles_binary_string = b''
-
+        for data in self.partition_data(data_bytes):
+            self.send_buffer[self.send_seq] = self.build_packet(data,0,self.send_seq, 0)
+            self.resend(self.send_seq)
+            self.send_seq += 1
 
     def repeat(self,seq):
         if seq not in self.acks:
@@ -65,10 +55,10 @@ class Streamer:
 
     def send_ack(self,seq):
         #print("Sending Acknowledgement for Packet #" + str(seq))
-        self.socket.sendto(self.build_packet(seq,True,False,bytes()), (self.dst_ip, self.dst_port))
+        self.socket.sendto(self.build_packet(bytes(),1,seq, 0), (self.dst_ip, self.dst_port))
 
     def send_fin(self):
-        self.socket.sendto(self.build_packet(self.send_seq,False,True,bytes()), (self.dst_ip, self.dst_port))
+        self.socket.sendto(self.build_packet(bytes(),0,-1, 1), (self.dst_ip, self.dst_port))
 
     def recv(self) -> bytes:
         """Blocks (waits) if no data is ready to be read from the connection."""
@@ -79,27 +69,35 @@ class Streamer:
         return self.recv_buffer.pop(self.recv_seq - 1)
 
     def close(self) -> None:
-    
-
-        while self.send_seq not in self.acks:
+        while -1 not in self.acks:
             self.send_fin()
             time.sleep(0.1)
         print("FIN HANDSHAKE")
-        time.sleep(5)
+        time.sleep(10)
         """Cleans up. It should block (wait) until the Streamer is done with all
            the necessary ACKs and retransmissions"""
         self.closed = True
         self.socket.stoprecv()
 
     def listener(self):
-        while not self.closed: # a later hint will explain self.closed
+        while not self.closed:
             try:
                 packet = self.socket.recvfrom()[0]
                 if packet:
-                    seq, ack, fin, data = self.deconstruct_packet(packet)
+                    seq, ack, fin, stored_hash, data = self.deconstruct_packet(packet)
 
+                    comparison_packet = struct.pack('iii' + str(len(data)) + 's', seq, ack, fin, data)
+                    # print('comparison packet seq: ', seq)
+                    # print(comparison_packet)
+                    hashed_packet_code = self.hash_helper(comparison_packet)
+                    
+                    hash_check = self.hash_validation(stored_hash, hashed_packet_code)
+                    if hash_check:
+                        continue
                     if ack:
                         self.acks.add(seq)
+                    elif fin:
+                        self.send_ack(seq)
                     else:
                         self.recv_buffer[seq] = data
                         self.send_ack(seq)
@@ -108,14 +106,27 @@ class Streamer:
                 print("listener died!")
                 print(e)
 
-    def build_packet(self, seq, ack, fin, data):
-        f = 'I??' + str(len(data)) + 's'
-        return struct.pack(f, seq, ack, fin, data)
-
-    def deconstruct_packet(self, packet):
-        f = 'I??' + str(len(packet)-6) + 's'
-        return struct.unpack(f, packet)
-
     def partition_data(self,data):
-        return (data[0 + i : 1466 + i] for i in range(0, len(data), 1466))
+        return (data[0 + i : 1444 + i] for i in range(0, len(data), 1444))
 
+    # packs data and hashes it
+    def build_packet(self, data, ack, seq, fin):
+        first_packet = struct.pack('iii' + str(len(data)) + 's', seq, ack, fin, data)
+        # print('first packet for seq', seq)
+        # print(first_packet)
+        hashed_packet_code = self.hash_helper(first_packet)
+        return struct.pack('iii16s' + str(len(data))+ 's', seq, ack, fin, hashed_packet_code, data)
+
+    def deconstruct_packet(self, data):
+        return struct.unpack('iii16s' + str(len(data)-28) + 's', data)
+
+    def hash_validation(self, stored_hash, hashed_packet_code):
+        # hashed_code = self.hash_helper(data)
+        if (stored_hash==hashed_packet_code): return False
+        return True
+
+    # returns a hash value
+    def hash_helper(self, data):
+        m = hashlib.md5()
+        m.update(data)
+        return m.digest()

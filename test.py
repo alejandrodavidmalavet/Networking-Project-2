@@ -4,7 +4,6 @@ import lossy_socket
 
 NUMS=1000
 
-
 def receive(s):
     expected = 0
     str_buf = ""
@@ -63,7 +62,11 @@ def host2(listen_port, remote_port):
 
 
 def main():
+<<<<<<< HEAD
     lossy_socket.sim = lossy_socket.SimulationParams(loss_rate=0.1, corruption_rate=0.0,
+=======
+    lossy_socket.sim = lossy_socket.SimulationParams(loss_rate=0.1, corruption_rate=0.1,
+>>>>>>> un-hashed
                                                      max_delivery_delay=0.1,
                                                      become_reliable_after=100000.0)
 
