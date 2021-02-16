@@ -1,3 +1,2 @@
-# Reliable Streaming Network Transport Simulator
-
-by Steve Tarzia
+Alejandro Malavet adm9791
+Philip Clement ppc7289

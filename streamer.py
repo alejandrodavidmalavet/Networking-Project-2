@@ -33,7 +33,6 @@ class Streamer:
         self.executor.submit(self.listener)
 
         self.acks = set()
-        self.fin = False
 
         self.nagles_binary_string = b''
         
@@ -66,7 +65,7 @@ class Streamer:
         self.socket.sendto(self.build_packet(bytes(),1,seq, 0), (self.dst_ip, self.dst_port))
 
     def send_fin(self):
-        self.socket.sendto(self.build_packet(bytes(),0,-1, 1), (self.dst_ip, self.dst_port))
+        self.socket.sendto(self.build_packet(bytes(),0,self.send_seq, 1), (self.dst_ip, self.dst_port))
 
     def recv(self) -> bytes:
         """Blocks (waits) if no data is ready to be read from the connection."""
@@ -77,7 +76,7 @@ class Streamer:
         return self.recv_buffer.pop(self.recv_seq - 1)
 
     def close(self) -> None:
-        while -1 not in self.acks:
+        while self.send_seq not in self.acks:
             self.send_fin()
             time.sleep(0.1)
         print("FIN HANDSHAKE")
