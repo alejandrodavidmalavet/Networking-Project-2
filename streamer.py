@@ -10,10 +10,6 @@ import time
 from threading import Timer
 
 import hashlib
-<<<<<<< HEAD
-
-=======
->>>>>>> un-hashed
 
 class Streamer:
     def __init__(self, dst_ip, dst_port,
@@ -38,16 +34,28 @@ class Streamer:
 
         self.acks = set()
         self.fin = False
+
+        self.nagles_binary_string = b''
         
     def resend(self, seq):
         self.socket.sendto(self.send_buffer[seq], (self.dst_ip,self.dst_port))
-        return Timer(1,self.repeat,[seq]).start()
+        return Timer(.5,self.repeat,[seq]).start()
 
     def send(self, data_bytes: bytes) -> None:
-        for data in self.partition_data(data_bytes):
+        if not len(self.nagles_binary_string):
+            Timer(0.05, self.nagles_algorithm, [len(data_bytes)]).start()
+            self.nagles_binary_string = data_bytes
+        else:
+            self.nagles_binary_string+=data_bytes
+    
+    def nagles_algorithm(self, currData):
+        if currData < len(self.nagles_binary_string):
+            return Timer(1, self.nagles_algorithm, [len(self.nagles_binary_string)]).start()
+        for data in self.partition_data(self.nagles_binary_string):
             self.send_buffer[self.send_seq] = self.build_packet(data,0,self.send_seq, 0)
             self.resend(self.send_seq)
             self.send_seq += 1
+        self.nagles_binary_string = b''
 
     def repeat(self,seq):
         if seq not in self.acks:
@@ -73,7 +81,7 @@ class Streamer:
             self.send_fin()
             time.sleep(0.1)
         print("FIN HANDSHAKE")
-        time.sleep(10)
+        time.sleep(15)
         """Cleans up. It should block (wait) until the Streamer is done with all
            the necessary ACKs and retransmissions"""
         self.closed = True
